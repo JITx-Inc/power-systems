@@ -1,0 +1,114 @@
+#use-added-syntax(jitx)
+doc: \<DOC>
+Power Bundle Utilities
+
+This package contains modules and functions that support the
+use of power bundles in a design.
+<DOC>
+defpackage power-systems/filters:
+  import core
+  import jitx
+  import jitx/commands
+
+  import jsl/ensure
+  import jsl/bundles
+  import jsl/design/introspection
+
+
+doc: \<DOC>
+Construct an unbalanced filter with {@link power} inputs/outputs
+
+This module creates an unbalanced filter, typically used with
+a ferrite, resistor, or other 2-pin device.
+
+An unbalanced filter places one device in series with the `V+`
+rail. The `V-` is directly coupled from input to output.
+
+@member vin Input Voltage Rail as a `power` bundle
+@param vout Output Voltage Rail as a `power` bundle
+
+@param comp Component that will be instantiated to create
+the filter. This component is expected to be a two-pin
+device. If this device is polarized then the anode `a` is
+connected to vin and the cathode `c` is connected to vout
+by default.
+@param flip If this parameter is true, the instantiated
+component is flipped - `c` connects to `vin` and `a` connects to `vout`.
+By default this is false.
+<DOC>
+public pcb-module unbalanced-filter (comp:Instantiable -- flip:True|False = false):
+  port vin : power
+  port vout : power
+
+  inst U : comp
+  val [c-t, a-t] = get-element-ports(U)
+
+  val [c, a] = if flip: [a-t, c-t]
+  else: [c-t, a-t]
+
+  net (vin.V+, a)
+  net (vout.V+, c)
+  net (vin.V-, vout.V-)
+
+doc: \<DOC>
+Create a balanced filter with {@link power} IO
+
+This module creates an balanced filter, typically used with
+a ferrite, resistor, or other 2-pin device.
+
+An balanced filter places two devices, one in series with each of
+the `V+` and `V-` rails.
+
+@member vin Input Voltage Rail
+@member vout Output Voltage Rail
+
+@param comp Component that will be instantiated to create
+the filter. This component is expected to be a two-pin
+device. If this device is polarized then the anode is
+connected to vin and the cathode is connected to vout
+by default.
+@param flip If this parameter is true, the instantiated
+components are both flipped - `c` connects to `vin` and `a` connects to `vout`.
+If false then no flip occurs. If a tuple is presented, then the components
+are individually flipped or not. The first value is for the `V+` side and
+the second is for the `V-` side.
+By default this is false.
+<DOC>
+public pcb-module balanced-filter (comp:Instantiable, flip:True|False|[True|False, True|False] = false):
+  port vin : power
+  port vout : power
+
+  inst U : comp[2]
+  for (ch in ["V+", "V-"], i in 0 to false) do:
+
+    val [c-t, a-t] = get-element-ports(U[i])
+
+    val f = match(flip):
+      (t:True): t
+      (a:[True|False, True|False]):
+        a[i]
+      (_:False): false
+
+    val [c, a] = if f: [a-t, c-t]
+    else: [c-t, a-t]
+
+    net (dot(vin, ch), a)
+    net (dot(vout, ch), c)
+
+doc: \<DOC>
+Construct a diode-OR of multiple inputs
+
+<DOC>
+public pcb-module diode-OR (comp:Instantiable, num-inputs:Int):
+  ensure-positive!("num-inputs", num-inputs)
+
+  port vin : power[num-inputs]
+  port vout : power
+
+  inst U : unbalanced-filter(comp)[num-inputs]
+
+  for i in 0 to num-inputs do:
+    net (vin[i], U[i].vin)
+    net (vout, U[i].vout)
+
+

@@ -1,0 +1,4 @@
+include? ".slm/stanza.proj"
+pkg-cache: ".slm/pkg-cache"
+
+packages power-systems/* defined-in "src/"

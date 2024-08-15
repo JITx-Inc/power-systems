@@ -1,0 +1,149 @@
+#use-added-syntax(jitx)
+defpackage power-systems/DC-DC/buck:
+  import core
+  import math
+  import jitx
+
+  import jsl/ensure
+
+
+
+doc: \<DOC>
+Buck Constraints and Calculations
+
+This type defines the interfaces for the Buck Switching
+Converter constraints. This type is used to compute
+necessary intermediate and component selection results.
+
+The base implementation make simplifying assumptions and is
+intended to be a starting point for computation. In real-world circuits,
+you may need to make modifications to these calculations. It is highly 
+suggested to create a derived type and then override methods as necessary.
+
+
+Many of the calculations will reference sections from
+'Fundamentals of Power Electronics' (FoPE) by Erickson.
+
+<DOC>
+public defstruct BuckConstraints:
+  doc: \<DOC>
+  Expected Input Voltage Range
+  <DOC>
+  v-in:Toleranced with:
+    ensure => ensure-positive!
+  doc: \<DOC>
+  Expected Output Voltage Range
+  <DOC>
+  v-out:Toleranced with:
+    ensure => ensure-positive!
+
+  doc: \<DOC>
+  Input Voltage Ripple Max in Volts
+  This is the peak-to-peak voltage ripple we 
+  want to target.
+  <DOC>
+  v-in-ripple-max:Double with:
+    ensure => ensure-positive!
+
+  doc: \<DOC>
+  Output Voltage Ripple Max in Volts
+  This is the peak-to-peak voltage ripper
+  we want to target.
+  <DOC>
+  v-out-ripple-max:Double with:
+    ensure => ensure-positive!
+
+  
+  doc: \<DOC>
+  Output Current Specification
+  NOTE: Don't use 0.0 for the `min-value` of the output
+  current as this will cause numerical calculation issues.
+  <DOC>
+  i-out:Toleranced with:
+    ensure => ensure-positive!
+
+  doc: \<DOC>
+  Target Switching Frequency for the Converter
+  <DOC>
+  freq:Toleranced|Double with:
+    ensure => ensure-positive!
+
+  doc: \<DOC>
+  Ripple Current as a Percentage of Inductor Current.
+  <DOC>
+  K:Percentage with:
+    ensure => ensure-positive!
+
+
+
+public defmulti duty-cycle (cxt:BuckConstraints) -> Toleranced
+public defmethod duty-cycle (cxt:BuckConstraints) -> Toleranced:
+  v-out(cxt) / v-in(cxt)
+
+doc: \<DOC>
+Compute the target ripple current based on input specifications.
+This is the peak-to-peak ripple current
+<DOC>
+public defmethod target-ripple-current (cxt:BuckConstraints) -> Toleranced
+public defmulti target-ripple-current (cxt:BuckConstraints) -> Toleranced:
+  K(cxt) * i-out(cxt)
+
+public defmulti compute-L (cxt:BuckConstraints) -> Toleranced
+public defmethod compute-L (cxt:BuckConstraints) -> Toleranced :
+  ; @see Equation 2.14 FoPE
+  val DC = duty-cycle(cxt)
+  val ripple-I = target-ripple-current(cxt)
+  (DC * (v-in(cxt) - v-out(cxt))) / (freq(cxt) * ripple-I)
+
+public defmulti compute-ripple-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced
+public defmethod compute-ripple-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced:
+  ensure-positive!("L", L)
+  ; @see Equation 2.16 FoPE
+  val DC = duty-cycle(cxt)
+  DC * (v-in(cxt) - v-out(cxt)) / (freq(cxt) * L)
+
+public defmulti compute-peak-current (cxt:BuckConstraints, L:Toleranced|Double) -> Double
+public defmethod compute-peak-current (cxt:BuckConstraints, L:Toleranced|Double) -> Double :
+  val ripple-I = compute-ripple-current(cxt, L)
+  max-value(i-out(cxt)) + (max-value(ripple-I) / 2.0)
+
+public defmulti compute-RMS-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced
+public defmethod compute-RMS-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced:
+
+  val iout-2 = (i-out(cxt) * i-out(cxt))
+  val ripple-I = compute-ripple-current(cxt, L)
+  val temp = pow(iout(cxt), 2.0) + (pow(ripple-I, 2.0) / 12.0)
+  sqrt(temp)
+
+public defmulti compute-min-C-out (cxt:BuckConstraints, L:Toleranced|Double) -> Double
+public defmethod compute-min-C-out (cxt:BuckConstraints, L:Toleranced|Double) -> Double :
+  ; See FoPE Equation 2.60
+  val ripple-I = compute-ripple-current(cxt, L)
+  val D = duty-cycle(cxt)
+  val ripple-V = v-out-ripple-max(cxt)
+
+  val cout-min = ripple-I / (8.0 * freq(cxt) * ripple-V)
+  max-value(cout-min)
+
+public defmulti compute-min-C-in (cxt:BuckConstraints) -> Double
+public defmethod compute-min-C-in (cxt:BuckConstraints) -> Double :
+  ; see: https://www.ti.com/lit/an/slyt670/slyt670.pdf
+  val D = duty-cycle(cxt)
+  val vin-ripple = v-in-ripple-max(cxt)
+
+  val cin = (D * (1.0 - D) * i-out(cxt)) / (vin-ripple * freq(cxt))
+  max-value(cin)
+
+public defmulti is-CCM? (cxt:BuckConstraints, L:Toleranced|Double, i-load:Double) -> True|False
+public defmethod is-CCM? (cxt:BuckConstraints, L:Toleranced|Double, i-load:Double) -> True|False :
+  val ripple = compute-ripple-current(cxt, L)
+  val min-load = i-load - (max-value(ripple) / 2.0)
+  min-load < 0.0
+
+doc: \<DOC>
+Use the nominal load instead of an explicit load
+<DOC>
+public defn is-CCM? (cxt:BuckConstraints, L:Toleranced|Double) -> True|False :
+  is-CCM?(cxt, L, typ(i-out(cxt)))
+
+
