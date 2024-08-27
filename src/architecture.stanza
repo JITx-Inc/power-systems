@@ -1,0 +1,34 @@
+#use-added-syntax(jitx)
+defpackage power-systems/architecture:
+  import core
+  import jitx
+
+
+doc: \<DOC>
+Base Type for Power Converter Architectures
+
+Derived types like Buck, Boost, etc, will implement
+the interface of this type.
+<DOC>
+public deftype ConverterArchitecture
+
+doc: \<DOC>
+Circuit Generator for Converter Architecture
+
+This function is generator and is expected to run in
+a `pcb-module` context.
+
+This function constructs the circuit architecture given
+an interface to the IC that controls the converter architecture.
+
+@param x This Converter
+@param pt Port of Bundle Type that interfaces to the IC. This type
+will typically be converter specific.
+@return Output nodes of the converter as a mapping `name => port`. For
+many architectures, there will be only one output. If the converter has
+multiple outputs (like for a transformer isolated switching converter),
+then the function can return uniquely named ports for each output.
+The names are implementation specific but the port will be either a
+module or component port.
+<DOC>
+public defmulti make-circuit (x:ConverterArchitecture, pt:JITXObject) -> Tuple<KeyValue<String, JITXObject>>

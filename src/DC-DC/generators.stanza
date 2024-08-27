@@ -1,0 +1,7 @@
+#use-added-syntax(jitx)
+defpackage power-systems/DC-DC/generators:
+  ; This is a forwarding package. As we add
+  ;  additional architectures, they should be forwarded
+  ;  here to make the programming interface for users
+  ;  easy to use.
+  forward power-systems/DC-DC/buck

@@ -3,10 +3,158 @@ defpackage power-systems/DC-DC/buck:
   import core
   import math
   import jitx
+  import jitx/commands
 
   import jsl/ensure
+  import jsl/errors
+  import jsl/circuits/Network
+  import jsl/circuits/utils
+  import jsl/pin-assignment
+  import jsl/design/introspection
+
+  import power-systems/architecture
+
+public pcb-enum power-systems/DC-DC/buck/BuckConvPins:
+  Buck-Bootstrap
+
+doc: \<DOC>
+Buck Converter Signal Interface Bundle
+
+This bundle defines the typical pins present for a buck
+converter. It is primarily used to provide a consistent
+interface for ICs so that we can write circuit generators.
+
+@member vin Input Voltage - typically where the input capacitance
+will be applied.
+@member gnd Ground reference pin for the converter
+@member sw Switch Node - High dV/dt and dI/dt node that
+connects to the inductor.
+@member feedback Controller feedback pin for the converter. Typically
+a voltage divider connects the output to this pin.
+@member bst Optional port that provides the internal bootstrap
+charge pump path.
+
+<DOC>
+public pcb-bundle buck-converter (opts:Collection<BuckConvPins>):
+  name = "Buck Converter Interface"
+  description = "Buck Converter's port configuration for more reusable circuits."
+
+  port vin
+  port gnd
+  port sw
+  port feedback
+
+  for opt in opts do:
+    switch(opt):
+      Buck-Bootstrap : make-pin(`bst)
+
+doc: \<DOC>
+Helper routine for wiring up the `buck-converter` bundle.
+
+This automatically constructs the bundle and applies
+signal ends properties for easier application of `short-trace`
+when needed in the buck converter generators.
+<DOC>
+public defn connect-buck-converter (b:JITXObject, VIN:JITXObject, GND:JITXObject, SW:JITXObject, FB:JITXObject, BST?:JITXObject = ?):
+  inside pcb-module:
+    port-forward-net(b.vin, VIN)
+    port-forward-net(b.gnd, GND)
+    port-forward-net(b.sw, SW)
+    port-forward-net(b.feedback, FB)
+    match(BST?):
+      (_:None): false
+      (given:One<JITXObject>):
+        port-forward-net(b.bst, value(given))
+
+doc: \<DOC>
+Check if a `buck-converter` has a `bst` bootstrap signal
+<DOC>
+public defn has-bootstrap (b:JITXObject) -> True|False:
+  for p in ports(b) any? :
+    val refName = to-string $ ref(p)
+    suffix?(refName, "bst")
 
 
+doc: \<DOC>
+Buck Converter Architecture
+
+This type defines a synchronous or non-synchronous buck
+converter architecture. The buck converter is typically
+a step-down converter. This type allows for the
+following features:
+
+1.  The input bulk capacitance
+2.  The Inductor
+3.  The output bulk capacitance
+4.  [Optional] Bootstrap capacitor circuit
+5.  [Optional] Low Side Switch/Diode for Non-Synchronous conversion
+
+Each element can be a `ANT` or an `Instantiable`. The `ANT` network
+allows for multiple components to be strung together easily while
+the `Instantiable` allows for maximum flexibility.
+
+Each is expected to have a standard non-polar or polarized two-pin
+interface.
+
+TODO - Diagram here showing where these elements fit.
+
+<DOC>
+public defstruct BuckArchitecture <: ConverterArchitecture :
+  cin:ANT|Instantiable
+  cout:ANT|Instantiable
+  coil:ANT|Instantiable
+  bst?:Maybe<ANT|Instantiable> with:
+    default => None()
+  low-sw?:Maybe<ANT|Instantiable> with:
+    default => None()
+with:
+  printer => true
+  keyword-constructor => true
+
+public defmethod make-circuit (x:BuckArchitecture, b:JITXObject) -> Tuple<KeyValue<String, JITXObject>> :
+  check-is-bundle?(b)
+  inside pcb-module:
+    val cin-type = to-instantiable(cin(x), name? = One $ "Cin-Bulk")
+    inst cin-circ : cin-type
+    bypass(cin-circ, b.vin, b.gnd)
+
+    val coil-type = to-instantiable(coil(x), name? = One $ "Coil")
+    inst L : coil-type
+    val [L-p1, vout-port] = get-element-ports(L)
+    short-net(`SW-NODE, L-p1, b.sw)
+
+    val cout-type = to-instantiable(cout(x), name? = One $ "Cout-Bulk")
+    inst cout-circ : cout-type
+    bypass(cout-circ, vout-port, b.gnd)
+
+    match(bst?(x)):
+      (_:None): false
+      (given:One<ANT|Instantiable>):
+        if not has-bootstrap(b):
+          throw $ ValueError("Bootstrap Circuit Passed - but Buck Converter Bundle has no 'bst' port")
+
+        val bst-type = to-instantiable(value(given), name? = One $ "Bootstrap")
+        inst bst-circ : bst-type
+        bypass(bst-circ, b.bst, b.sw)
+
+    match(low-sw?(x)):
+      (_:None): false
+      (given:One<ANT|Instantiable>):
+        ; Add the Diode/Switch to the switch node
+        ;  to provide the off-time conduction path.
+        val D-type = to-instantiable(value(given), name? = One $ "Low-side Switch")
+        inst D : D-type
+        val [D-a, D-c] = get-element-ports(D)
+        short-net(D-c, b.sw)
+        net (D-a, b.gnd)
+
+    ["VOUT" => vout-port]
+
+
+defn to-toleranced (x:Toleranced|Double) -> Toleranced:
+  match(x):
+    (d:Double): typ(d)
+    (t:Toleranced): t
 
 doc: \<DOC>
 Buck Constraints and Calculations
@@ -17,7 +165,7 @@ necessary intermediate and component selection results.
 
 The base implementation make simplifying assumptions and is
 intended to be a starting point for computation. In real-world circuits,
-you may need to make modifications to these calculations. It is highly 
+you may need to make modifications to these calculations. It is highly
 suggested to create a derived type and then override methods as necessary.
 
 
@@ -39,7 +187,7 @@ public defstruct BuckConstraints:
 
   doc: \<DOC>
   Input Voltage Ripple Max in Volts
-  This is the peak-to-peak voltage ripple we 
+  This is the peak-to-peak voltage ripple we
   want to target.
   <DOC>
   v-in-ripple-max:Double with:
@@ -53,7 +201,7 @@ public defstruct BuckConstraints:
   v-out-ripple-max:Double with:
     ensure => ensure-positive!
 
-  
+
   doc: \<DOC>
   Output Current Specification
   NOTE: Don't use 0.0 for the `min-value` of the output
@@ -73,8 +221,9 @@ public defstruct BuckConstraints:
   <DOC>
   K:Percentage with:
     ensure => ensure-positive!
-
-
+with:
+  printer => true
+  keyword-constructor => true
 
 public defmulti duty-cycle (cxt:BuckConstraints) -> Toleranced
 public defmethod duty-cycle (cxt:BuckConstraints) -> Toleranced:
@@ -84,10 +233,13 @@ doc: \<DOC>
 Compute the target ripple current based on input specifications.
 This is the peak-to-peak ripple current
 <DOC>
-public defmethod target-ripple-current (cxt:BuckConstraints) -> Toleranced
-public defmulti target-ripple-current (cxt:BuckConstraints) -> Toleranced:
+public defmulti target-ripple-current (cxt:BuckConstraints) -> Toleranced
+public defmethod target-ripple-current (cxt:BuckConstraints) -> Toleranced:
   K(cxt) * i-out(cxt)
 
+doc: \<DOC>
+Compute Min Inductance Value in Henries
+<DOC>
 public defmulti compute-L (cxt:BuckConstraints) -> Toleranced
 public defmethod compute-L (cxt:BuckConstraints) -> Toleranced :
   ; @see Equation 2.14 FoPE
@@ -95,45 +247,70 @@ public defmethod compute-L (cxt:BuckConstraints) -> Toleranced :
   val ripple-I = target-ripple-current(cxt)
   (DC * (v-in(cxt) - v-out(cxt))) / (freq(cxt) * ripple-I)
 
+doc: \<DOC>
+Compute Expected Ripple Current in Amps
+@param L Selected inductance value in Henries.
+<DOC>
 public defmulti compute-ripple-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced
 public defmethod compute-ripple-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced:
   ensure-positive!("L", L)
   ; @see Equation 2.16 FoPE
   val DC = duty-cycle(cxt)
-  DC * (v-in(cxt) - v-out(cxt)) / (freq(cxt) * L)
+  DC * (v-in(cxt) - v-out(cxt)) / to-toleranced((freq(cxt) * L))
 
+doc: \<DOC>
+Compute Expected Peak Current in Amps
+@param L Selected inductance value in Henries.
+<DOC>
 public defmulti compute-peak-current (cxt:BuckConstraints, L:Toleranced|Double) -> Double
 public defmethod compute-peak-current (cxt:BuckConstraints, L:Toleranced|Double) -> Double :
   val ripple-I = compute-ripple-current(cxt, L)
   max-value(i-out(cxt)) + (max-value(ripple-I) / 2.0)
 
+doc: \<DOC>
+Compute Expected RMS Current in Amps
+@param L Selected inductance value in Henries.
+<DOC>
 public defmulti compute-RMS-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced
 public defmethod compute-RMS-current (cxt:BuckConstraints, L:Toleranced|Double) -> Toleranced:
 
   val iout-2 = (i-out(cxt) * i-out(cxt))
   val ripple-I = compute-ripple-current(cxt, L)
-  val temp = pow(iout(cxt), 2.0) + (pow(ripple-I, 2.0) / 12.0)
+  val temp = iout-2 + (pow(ripple-I, 2.0) / typ(12.0))
   sqrt(temp)
 
+doc: \<DOC>
+Compute Minimum Output Capacitance in Farads
+@param L Selected inductance value in Henries.
+<DOC>
 public defmulti compute-min-C-out (cxt:BuckConstraints, L:Toleranced|Double) -> Double
 public defmethod compute-min-C-out (cxt:BuckConstraints, L:Toleranced|Double) -> Double :
   ; See FoPE Equation 2.60
   val ripple-I = compute-ripple-current(cxt, L)
-  val D = duty-cycle(cxt)
   val ripple-V = v-out-ripple-max(cxt)
 
-  val cout-min = ripple-I / (8.0 * freq(cxt) * ripple-V)
+  val cout-min = ripple-I / (8.0 * ripple-V * to-toleranced(freq(cxt)))
   max-value(cout-min)
 
+doc: \<DOC>
+Compute Minimum Input Capacitance in Farads
+@param L Selected inductance value in Henries.
+<DOC>
 public defmulti compute-min-C-in (cxt:BuckConstraints) -> Double
 public defmethod compute-min-C-in (cxt:BuckConstraints) -> Double :
   ; see: https://www.ti.com/lit/an/slyt670/slyt670.pdf
   val D = duty-cycle(cxt)
   val vin-ripple = v-in-ripple-max(cxt)
 
-  val cin = (D * (1.0 - D) * i-out(cxt)) / (vin-ripple * freq(cxt))
+  val cin = (D * (1.0 - D) * i-out(cxt)) / (vin-ripple * to-toleranced(freq(cxt)))
   max-value(cin)
 
+doc: \<DOC>
+Given a load, determine if the converter will operate in Continuous Conduction Mode
+
+@param L Selected inductance value in Henries.
+@param i-load Average system load on the converter.
+<DOC>
 public defmulti is-CCM? (cxt:BuckConstraints, L:Toleranced|Double, i-load:Double) -> True|False
 public defmethod is-CCM? (cxt:BuckConstraints, L:Toleranced|Double, i-load:Double) -> True|False :
   val ripple = compute-ripple-current(cxt, L)
@@ -141,9 +318,33 @@ public defmethod is-CCM? (cxt:BuckConstraints, L:Toleranced|Double, i-load:Doubl
   min-load < 0.0
 
 doc: \<DOC>
-Use the nominal load instead of an explicit load
+Check CCM with the nominal load instead of an explicit load
 <DOC>
 public defn is-CCM? (cxt:BuckConstraints, L:Toleranced|Double) -> True|False :
   is-CCM?(cxt, L, typ(i-out(cxt)))
 
 
+doc: \<DOC>
+This type is intended for communicating a buck converter solution
+between the code computing the required values and the code
+that is implementing the architecture construction (see {@link BuckArchitecture})
+<DOC>
+public defstruct BuckSolution :
+  doc: \<DOC>
+  Inductor's inductance value in Henries
+  <DOC>
+  L:Double with:
+    ensure => ensure-positive!
+  doc: \<DOC>
+  Input Capacitance in Farads
+  <DOC>
+  C-in:Double with:
+    ensure => ensure-positive!
+  doc: \<DOC>
+  Output Capacitance in Farads
+  <DOC>
+  C-out:Double with:
+    ensure => ensure-positive!
+with:
+  printer => true
+  keyword-constructor => true
