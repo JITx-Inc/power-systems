@@ -111,4 +111,15 @@ public pcb-module diode-OR (comp:Instantiable, num-inputs:Int):
     net (vin[i], U[i].vin)
     net (vout, U[i].vout)
 
+doc: \<DOC>
+Apply a voltage rail to a Two-Pin Device
 
+@param x Instance with a standard non-polarized or polarized
+connection interface.
+@param rail `power` bundle port to apply to the two-pin
+<DOC>
+public defn apply-power (x:Instance, rail:JITXObject) :
+  inside pcb-module:
+    val [p1, p2] = get-element-ports(x)
+    net (p1, rail.V+)
+    net (p2, rail.V-)
