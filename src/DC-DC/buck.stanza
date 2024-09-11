@@ -8,6 +8,7 @@ defpackage power-systems/DC-DC/buck:
   import jsl/ensure
   import jsl/errors
   import jsl/circuits/Network
+  import jsl/circuits/Bypass
   import jsl/circuits/utils
   import jsl/pin-assignment
   import jsl/design/introspection
@@ -115,8 +116,8 @@ public defmethod make-circuit (x:BuckArchitecture, b:JITXObject) -> Tuple<KeyVal
   check-is-bundle?(b)
   inside pcb-module:
     val cin-type = to-instantiable(cin(x), name? = One $ "Cin-Bulk")
-    inst cin-circ : cin-type
-    bypass(cin-circ, b.vin, b.gnd)
+    insert-bypass(b.vin, b.gnd, elem-type = cin-type, inst-name = `cin-circ)
+
 
     val coil-type = to-instantiable(coil(x), name? = One $ "Coil")
     inst L : coil-type
@@ -124,8 +125,7 @@ public defmethod make-circuit (x:BuckArchitecture, b:JITXObject) -> Tuple<KeyVal
     short-net(`SW-NODE, L-p1, b.sw)
 
     val cout-type = to-instantiable(cout(x), name? = One $ "Cout-Bulk")
-    inst cout-circ : cout-type
-    bypass(cout-circ, vout-port, b.gnd)
+    insert-bypass(vout-port, b.gnd, elem-type = cout-type, inst-name = `cout-circ)
 
     match(bst?(x)):
       (_:None): false
@@ -134,8 +134,8 @@ public defmethod make-circuit (x:BuckArchitecture, b:JITXObject) -> Tuple<KeyVal
           throw $ ValueError("Bootstrap Circuit Passed - but Buck Converter Bundle has no 'bst' port")
 
         val bst-type = to-instantiable(value(given), name? = One $ "Bootstrap")
-        inst bst-circ : bst-type
-        bypass(bst-circ, b.bst, b.sw)
+        insert-bypass(b.bst, b.sw, elem-type = bst-type, inst-name = `bst-circ)
+
 
     match(low-sw?(x)):
       (_:None): false
