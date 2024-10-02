@@ -47,7 +47,7 @@ public pcb-bundle buck-converter (opts:Collection<BuckConvPins>):
 
   for opt in opts do:
     switch(opt):
-      Buck-Bootstrap : make-pin(`bst)
+      Buck-Bootstrap : make-port(`bst)
 
 doc: \<DOC>
 Helper routine for wiring up the `buck-converter` bundle.
