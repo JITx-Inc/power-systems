@@ -195,7 +195,6 @@ public defstruct BuckConstraints:
   v-out-ripple-max:Double with:
     ensure => ensure-positive!
 
-
   doc: \<DOC>
   Output Current Specification
   NOTE: Don't use 0.0 for the `min-value` of the output
@@ -215,6 +214,24 @@ public defstruct BuckConstraints:
   <DOC>
   K:Percentage with:
     ensure => ensure-positive!
+
+  doc: \<DOC>
+  Capacitor Voltage Margin
+
+  Increase the voltage rating on selected capacitors by this
+  percent as a safety factor.
+  <DOC>
+  cap-V-margin:Percentage with:
+    ensure => ensure-positive!
+    default => (30 %)
+
+  doc: \<DOC>
+  Output Current Margin
+  <DOC>
+  I-margin:Percentage with:
+    ensure => ensure-positive!
+    default => (30 %)
+
 with:
   printer => true
   keyword-constructor => true
@@ -317,6 +334,22 @@ Check CCM with the nominal load instead of an explicit load
 public defn is-CCM? (cxt:BuckConstraints, L:Toleranced|Double) -> True|False :
   is-CCM?(cxt, L, typ(i-out(cxt)))
 
+doc: \<DOC>
+Compute the Buck Solution given Buck Converter Constraints
+@param cxt Constraints object - This defines the features of the
+buck converter that we will attempt to find a solution for.
+@param L-Series Series of inductor values to select from.
+@param C-Series Series of capacitor values to select from.
+@return Buck Converter Solution
+<DOC>
+public defn compute-solution (cxt:BuckConstraints, L-Series:E-Series = E12(), C-Series:E-Series = E12()) -> BuckSolution:
+  val L-val = compute-L(cxt)
+  val L = find-ceil(L-Series, typ(L-val))
+  val C-out-val = compute-min-C-out(cxt, L)
+  val C-out = find-ceil(C-Series, C-out-val)
+  val C-in-val = compute-min-C-in(cxt)
+  val C-in = find-ceil(C-Series, C-in-val)
+  BuckSolution(L, C-in, C-out)
 
 doc: \<DOC>
 This type is intended for communicating a buck converter solution

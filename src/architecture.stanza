@@ -3,6 +3,19 @@ defpackage power-systems/architecture:
   import core
   import jitx
 
+  import jsl
+
+doc: \<DOC>
+Power Converter Interface Bundle
+
+Each power converter should use this interface
+at the top level to convert an input power rail
+to an output power rail.
+<DOC>
+public pcb-bundle power-converter :
+  port VIN : power
+  port VOUT : power
+
 
 doc: \<DOC>
 Base Type for Power Converter Architectures
