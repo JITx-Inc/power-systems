@@ -29,7 +29,7 @@ by default.
 ## diode-OR
 Construct a diode-OR of multiple inputs
 ```
-  inst USB-OR : diode-OR(diodes/SSA33L/component, 2)
+  inst USB-OR : diode-OR(diodes/SSA33L/component, 3)
 ```
 ### ports
 ```
