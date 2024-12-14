@@ -29,7 +29,7 @@ by default.
 ## diode-OR
 Construct a diode-OR of multiple inputs
 ```
-  inst OR : diode-OR(diodes/SSA33L/component, 3)
+  inst OR : power-systems/filters/diode-OR(diodes/SSA33L/component, 3)
 ```
 ### ports
 ```
